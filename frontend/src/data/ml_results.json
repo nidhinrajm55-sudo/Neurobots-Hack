@@ -1,0 +1,23 @@
+{
+    "service": "payment-service",
+    "change_event": {
+        "type": "deployment",
+        "timestamp": "2026-01-31T19:07:40.161516"
+    },
+    "anomaly": {
+        "score": -0.06,
+        "is_anomaly": true
+    },
+    "correlation": {
+        "is_correlated": true,
+        "confidence": 0.83,
+        "delay_minutes": 1
+    },
+    "indicators": [
+        "CPU usage increased 43% after deployment",
+        "Memory usage increased 43% after deployment",
+        "Request rate increased 43% after deployment",
+        "CPU trend decreased 43% after deployment",
+        "Memory trend increased 43% after deployment"
+    ]
+}

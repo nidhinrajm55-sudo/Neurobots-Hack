@@ -1,0 +1,41 @@
+{
+    "timestamp": "2026-01-31T17:13:03.709371",
+    "input_file": "initial.csv",
+    "total_rows": 1,
+    "results": [
+        {
+            "row": 1,
+            "isolation_forest": {
+                "is_anomaly": true,
+                "anomaly_score": -0.03140368042825403
+            },
+            "random_forest": {
+                "prediction": "Normal",
+                "confidence": 0.5366666666666666,
+                "accuracy": "53.67%"
+            },
+            "features": {
+                "mean_cpu": 0.0,
+                "std_cpu": 6.0,
+                "min_cpu": 0.0,
+                "max_cpu": 44.0,
+                "delta_cpu": 5.0,
+                "cpu_trend": 0.3,
+                "cpu_volatility": 0.4,
+                "mean_memory": 40.0,
+                "std_memory": 18.0,
+                "memory_trend": 2.7,
+                "mean_requests": 1250.0,
+                "request_spike_count": 90.0,
+                "throughput_delta": 30.0,
+                "cost_delta": 0.0,
+                "unit_economics_ratio": 0.0
+            }
+        }
+    ],
+    "model_metadata": {
+        "isolation_forest": "Trained Anomaly Detector",
+        "random_forest": "Health State Classifier",
+        "overall_accuracy_claim": "95.4%"
+    }
+}
