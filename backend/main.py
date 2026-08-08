@@ -784,6 +784,45 @@ def get_graph():
         ]
     }
 
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "") or os.getenv("NEXT_PUBLIC_GROQ_API_KEY", "")
+
+def call_groq_llm(messages: List[Dict[str, str]], system_instruction: str = None) -> Optional[str]:
+    """Calls Groq Llama-3.3-70b-versatile API for real-time generative AI responses."""
+    if not GROQ_API_KEY:
+        return None
+
+    api_messages = []
+    if system_instruction:
+        api_messages.append({"role": "system", "content": system_instruction})
+    
+    for m in messages:
+        role = m.get("role") or ("assistant" if m.get("sender") == "bot" else "user")
+        content = m.get("content") or m.get("text", "")
+        if content:
+            api_messages.append({"role": role, "content": content})
+
+    try:
+        res = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "llama-3.3-70b-versatile",
+                "messages": api_messages,
+                "temperature": 0.4,
+                "max_tokens": 1024
+            },
+            timeout=8.0
+        )
+        if res.status_code == 200:
+            data = res.json()
+            return data["choices"][0]["message"]["content"]
+    except Exception as e:
+        print(f"⚠️ Groq API Error: {e}")
+    return None
+
 # --- Real-Time AI Security & URL Audit Chatbot Endpoints ---
 
 class BotAnalyzePayload(BaseModel):
@@ -913,6 +952,16 @@ def analyze_target_url(payload: BotAnalyzePayload):
     score = max(30, min(100, score))
     status_label = "VULNERABILITY DETECTED" if score < 75 else "HEALTHY & AUDITED"
 
+    # Call Groq to generate AI Audit Summary
+    summary_prompt = [
+        {
+            "role": "user",
+            "content": f"Target domain {domain} was scanned in {payload.permission} mode. TTFB latency: {ttfb_ms}ms. Score: {score}/100. Discovered {len(findings)} findings. Summarize findings in 2 short bullet points."
+        }
+    ]
+    ai_summary = call_groq_llm(summary_prompt, "You are Sentinel-X AI Security Audit Engine.")
+    final_summary = ai_summary if ai_summary else f"Real-time scan of {domain} finished in {ttfb_ms}ms. Discovered {len(findings)} security items in {payload.permission.upper()} mode."
+
     return {
         "url": url,
         "domain": domain,
@@ -921,50 +970,53 @@ def analyze_target_url(payload: BotAnalyzePayload):
         "score": score,
         "status": status_label,
         "ttfb_ms": ttfb_ms,
-        "summary": f"Real-time scan of {domain} finished in {ttfb_ms}ms. Discovered {len(findings)} security items in {payload.permission.upper()} mode.",
-        "findings": findings
+        "summary": final_summary,
+        "findings": findings,
+        "engine": "Groq Llama-3.3-70B AI Engine"
     }
 
 @app.post("/bot/chat")
 def chat_with_bot(payload: BotChatPayload):
-    msg = payload.message.lower().strip()
-    reply = ""
-    code_snippet = None
+    user_msg = payload.message.strip()
 
-    if "header" in msg or "hsts" in msg or "csp" in msg:
-        reply = "🔒 **Security Header Remediation**:\nTo secure your web application against MITM, clickjacking, and XSS attacks, add the following production headers to your server or Next.js middleware:"
-        code_snippet = """// Production Security Middleware (Next.js / Node.js / FastAPI)
-export function middleware(request) {
-  const response = NextResponse.next();
-  response.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
-  response.headers.set('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline';");
-  response.headers.set('X-Frame-Options', 'DENY');
-  response.headers.set('X-Content-Type-Options', 'nosniff');
-  return response;
-}"""
-    elif "cors" in msg:
-        reply = "🌐 **CORS Configuration Guide**:\nAvoid using `Access-Control-Allow-Origin: *` in production. Instead, dynamically check the origin header or specify your exact trusted domain."
-        code_snippet = """# FastAPI / Python CORS Middleware Fix
-from fastapi.middleware.cors import CORSMiddleware
+    system_prompt = (
+        "You are Sentinel-X AI, a world-class Real-Time Cybersecurity Advisor and ML Anomaly Detection Expert for DevInsight / Neurobots.\n"
+        "Provide professional, clear, concise answers formatted in markdown. Include exact code remediation blocks (Next.js, Nginx, FastAPI, Docker, CORS) when appropriate.\n"
+        "Always enclose code solutions in triple backticks code blocks like ```javascript or ```python."
+    )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["https://yourdomain.com"],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
-    allow_headers=["Authorization", "Content-Type"],
-)"""
-    elif "blast" in msg or "radius" in msg or "impact" in msg:
-        reply = "💥 **Real-Time Blast Radius Calculation**:\n- **Target Node**: API Gateway & Authentication Service\n- **Impact Score**: 84/100 (High Priority)\n- **Propagation Pathway**: Insecure Headers -> Session Interception -> Auth Database Exposure\n- **Mitigation**: Enforce HSTS, SameSite=Strict cookies, and restrict CORS origin."
-    elif "score" in msg or "status" in msg or "health" in msg:
-        reply = "📊 **Sentinel-X Real-Time Diagnostic Status**:\n- Target Status: **ONLINE**\n- Isolation Forest Anomaly Score: **-0.12 (Nominal)**\n- Random Forest Classification: **HEALTHY (98.4% Confidence)**\n- Active Threats: **0 Active Attacks Detected**"
-    else:
-        reply = f"I have evaluated your prompt: **\"{payload.message}\"** using the real-time Sentinel-X security engine.\n\nKey Recommendations:\n1. Run a URL scan using the top bar to inspect headers and TTFB latency.\n2. Apply HSTS and CSP headers to block script injection.\n3. Feel free to ask for custom Nginx, Docker, or FastAPI patch scripts!"
+    history_formatted = []
+    for h in (payload.history or [])[-6:]:
+        role = "assistant" if h.get("sender") == "bot" else "user"
+        content = h.get("text") or h.get("content") or ""
+        if content:
+            history_formatted.append({"role": role, "content": content})
 
+    history_formatted.append({"role": "user", "content": user_msg})
+
+    # Call Groq Llama-3.3-70b-versatile
+    groq_reply = call_groq_llm(history_formatted, system_prompt)
+
+    if groq_reply:
+        import re
+        code_match = re.search(r'```(?:\w+)?\n(.*?)```', groq_reply, re.DOTALL)
+        code_snippet = code_match.group(1).strip() if code_match else None
+
+        return {
+            "reply": groq_reply,
+            "codeSnippet": code_snippet,
+            "timestamp": datetime.utcnow().isoformat(),
+            "model_used": "groq/llama-3.3-70b-versatile"
+        }
+
+    # Static fallback if Groq API call fails
+    msg = user_msg.lower()
+    reply = f"I have analyzed your query regarding **\"{user_msg}\"** using the Sentinel-X AI security engine.\n\n1. Enforce HSTS and CSP headers.\n2. Restrict CORS Access-Control-Allow-Origin headers."
     return {
         "reply": reply,
-        "codeSnippet": code_snippet,
+        "codeSnippet": None,
         "timestamp": datetime.utcnow().isoformat()
     }
+
 
 
