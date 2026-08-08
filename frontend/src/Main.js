@@ -7,6 +7,7 @@ import Dashboard from './components/Dashboard';
 import Problems from './components/Problems';
 import Prioritization from './components/Prioritization';
 import BlastRadius from './components/BlastRadius';
+import SecurityBot from './components/SecurityBot';
 import { Toaster } from 'sonner';
 
 import Login from './components/Login';
@@ -128,6 +129,9 @@ function MainApp() {
 
             case 'Blast Radius':
                 return <BlastRadius />;
+
+            case 'AI Assistant':
+                return <SecurityBot />;
 
             default:
                 return null;

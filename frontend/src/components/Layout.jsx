@@ -3,9 +3,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Activity, Bell, LogOut, ShieldCheck, Palette, Sparkles, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiClient } from '../utils/api';
+import FloatingChatWidget from './FloatingChatWidget';
 
 const Layout = ({ children, activeTab, onTabChange, user, onLogout, currentTheme = 'light', onThemeChange }) => {
-    const tabs = ['Dashboard', 'Problems', 'Prioritization', 'Blast Radius'];
+    const tabs = ['Dashboard', 'Problems', 'Prioritization', 'Blast Radius', 'AI Assistant'];
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [isThemeMenuOpen, setIsThemeMenuOpen] = useState(false);
     const [isAttackMenuOpen, setIsAttackMenuOpen] = useState(false);
@@ -317,6 +318,9 @@ const Layout = ({ children, activeTab, onTabChange, user, onLogout, currentTheme
                 <div className="flex-1 animate-in fade-in slide-in-from-bottom-2 duration-300 pb-8">
                     {children}
                 </div>
+
+                {/* Floating AI Chatbot Widget */}
+                <FloatingChatWidget />
 
                 {/* PRD Last Updated Timestamp Badge */}
                 <div className="fixed bottom-3 right-4 z-40 bg-slate-900/90 text-slate-400 border border-slate-700/80 backdrop-blur-md px-3 py-1 rounded-full text-[10px] font-mono shadow-lg flex items-center gap-1.5 pointer-events-none">
