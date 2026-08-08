@@ -1,0 +1,4 @@
+# backend/data/input/sample_telemetry.csv
+mean_cpu,std_cpu,min_cpu,max_cpu,delta_cpu,cpu_trend,cpu_volatility,mean_memory,std_memory,memory_trend,mean_requests,request_spike_count,throughput_delta,cost_delta,unit_economics_ratio
+0,6.0,0.0,44.0,5.0,0.3,0.4,40.0,18.0,2.7,1250.0,90,30.0,0.0,0
+90,6.0,0.0,55.0,5.0,0.3,0.4,40.0,90.0,99.7,1250.0,90,30.0,90.0,9

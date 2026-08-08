@@ -1,0 +1,23 @@
+{
+    "service": "payment-service",
+    "change_event": {
+        "type": "automated_remediation",
+        "timestamp": "2026-08-06T11:19:50.658117",
+        "action": "K8s Pod Restart & Deployment Rollback"
+    },
+    "anomaly": {
+        "score": 0.185,
+        "is_anomaly": false,
+        "anomaly_type": "Normal (Auto-remediated)"
+    },
+    "correlation": {
+        "is_correlated": false,
+        "confidence": 0.0,
+        "delay_minutes": 0
+    },
+    "indicators": [
+        "Latency restored to 124ms nominal",
+        "Error rate reduced to 0%",
+        "CPU usage normalized to 32.5%"
+    ]
+}

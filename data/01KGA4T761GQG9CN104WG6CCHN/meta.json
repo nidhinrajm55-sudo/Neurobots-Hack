@@ -1,0 +1,18 @@
+{
+	"ulid": "01KGA4T761GQG9CN104WG6CCHN",
+	"minTime": 1769856322795,
+	"maxTime": 1769860800000,
+	"stats": {
+		"numSamples": 45000,
+		"numFloatSamples": 45000,
+		"numSeries": 40,
+		"numChunks": 371
+	},
+	"compaction": {
+		"level": 1,
+		"sources": [
+			"01KGA4T761GQG9CN104WG6CCHN"
+		]
+	},
+	"version": 1
+}

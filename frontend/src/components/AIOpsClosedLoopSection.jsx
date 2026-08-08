@@ -26,15 +26,49 @@ const AIOpsClosedLoopSection = () => {
     });
 
     useEffect(() => {
-        const fetchPhase = async () => {
+        const fetchState = async () => {
             try {
                 const res = await apiClient.getRolloutPhase();
                 if (res && res.phase) {
                     setActivePhase(res.phase);
                 }
+
+                const statusRes = await apiClient.getStatus();
+                if (statusRes && statusRes.active_attack?.is_active) {
+                    const mode = statusRes.active_attack.mode || 'load_flood';
+                    setTelemetry({
+                        cpu: mode === 'memory_leak' ? 96.2 : 94.8,
+                        memory: mode === 'memory_leak' ? 840.5 : 360.2,
+                        diskIo: 92.4,
+                        network: '184.5 MB/s',
+                        httpP95: mode === 'memory_leak' ? 780 : 1840,
+                        error5xx: 18.4,
+                        dbLocks: '98 / 100 (CRITICAL SATURATION)',
+                        ttfWindow: '~3m 45s (94% Confidence)',
+                        isoForestScore: -0.48,
+                        rfClassification: `ATTACK_${mode.toUpperCase()}`,
+                        rfConfidence: 0.98
+                    });
+                } else {
+                    setTelemetry({
+                        cpu: 12.4,
+                        memory: 52.0,
+                        diskIo: 8.5,
+                        network: '14.2 MB/s',
+                        httpP95: 24,
+                        error5xx: 0.00,
+                        dbLocks: '12 / 100 (Normal)',
+                        ttfWindow: 'Nominal',
+                        isoForestScore: 0.18,
+                        rfClassification: 'HEALTHY_BASELINE',
+                        rfConfidence: 0.98
+                    });
+                }
             } catch (e) {}
         };
-        fetchPhase();
+        fetchState();
+        const interval = setInterval(fetchState, 2000);
+        return () => clearInterval(interval);
     }, []);
 
     const phases = [

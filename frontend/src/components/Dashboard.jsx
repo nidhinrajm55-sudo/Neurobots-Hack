@@ -1,566 +1,432 @@
+'use client';
 import React, { useState, useEffect } from 'react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { toast } from 'sonner';
-import { Activity, Server, Zap, CheckCircle, AlertTriangle, ArrowUp, ArrowDown, Layers, DollarSign, Brain, Loader2, Waves, Radio, ShieldCheck, Gauge } from 'lucide-react';
+import { 
+  ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, 
+  Legend, AreaChart, Area, BarChart, Bar
+} from 'recharts';
+import { 
+  Activity, Server, Zap, CheckCircle, AlertTriangle, ArrowUp, ArrowDown, 
+  Layers, DollarSign, Brain, Loader2, Waves, Radio, ShieldCheck, Gauge,
+  RefreshCcw, Settings, Terminal, LayoutGrid
+} from 'lucide-react';
 import Card from './Card';
-import CorrelationAnalysis from './CorrelationAnalysis';
-import RobotInspector from './RobotInspector';
-import AIOpsClosedLoopSection from './AIOpsClosedLoopSection';
-import { getDashboardMetrics } from '../utils/dataProvider';
 import { apiClient } from '../utils/api';
 
 const Dashboard = () => {
-    // Top-level metrics
-    const [metrics, setMetrics] = useState({
-        responseTime: 124,
-        successRate: 99.98,
-        activeIncidents: 0,
-        cpuUsage: 42,
-        requests: '2500/s',
-        cost: '$0'
-    });
+  const [nodes, setNodes] = useState([]);
+  const [systemStatus, setSystemStatus] = useState('healthy');
+  const [worstNode, setWorstNode] = useState(null);
+  const [activeAttack, setActiveAttack] = useState(null);
+  const [chartData, setChartData] = useState({});
+  const [modelConfidence, setModelConfidence] = useState({});
+  const [recentActivity, setRecentActivity] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedServiceForChart, setSelectedServiceForChart] = useState(null);
+  const [activeMetricFilter, setActiveMetricFilter] = useState('all');
 
-    const [isDisasterMode, setIsDisasterMode] = useState(false);
-    const [activeDeploy, setActiveDeploy] = useState(false);
-    const [chartData, setChartData] = useState([]);
-    const [isScanning, setIsScanning] = useState(false);
-    const [lastScanResults, setLastScanResults] = useState(null);
+  // Fetch all dashboard data
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      try {
+        const nodesData = await apiClient.getNodes();
+        setNodes(nodesData.nodes || []);
+        setSystemStatus(nodesData.system_status || 'healthy');
+        setWorstNode(nodesData.worst_node || null);
+        setActiveAttack(nodesData.active_attack || null);
 
-    // Auto-fix handler when Sentinal Bot finishes hammering
-    const handleRobotRepairComplete = async (service = 'payment-service') => {
-        try {
-            await apiClient.autoFix(service);
-            setIsDisasterMode(false);
-            setMetrics(prev => ({ ...prev, responseTime: 124, activeIncidents: 0 }));
-            toast.success('System Auto-Remediated!', {
-                description: `Sentinal Bot restored ${service} to operational state.`
-            });
-        } catch (err) {
-            setIsDisasterMode(false);
+        const problemsData = await apiClient.getProblems({ limit: 5 });
+        setRecentActivity(problemsData.problems || []);
+
+        const targetSvc = nodesData.worst_node ||
+                          (nodesData.active_attack?.is_active ? 
+                            (nodesData.active_attack.mode === 'memory_leak' ? 'auth-service' : 'order-service') : 
+                            (selectedServiceForChart || nodesData.nodes?.[0]?.service || 'order-service'));
+
+        if (!selectedServiceForChart || nodesData.active_attack?.is_active) {
+          setSelectedServiceForChart(targetSvc);
         }
+
+        const currentChartSvc = selectedServiceForChart || targetSvc;
+        const timeseriesData = await apiClient.getMetricsTimeseries(currentChartSvc, '120s');
+        setChartData(prev => ({
+          ...prev,
+          [currentChartSvc]: timeseriesData
+        }));
+
+      } catch (error) {
+        console.error('Error fetching dashboard data:', error);
+      } finally {
+        setLoading(false);
+      }
     };
 
-    // Trigger Chaos Incident handler
-    const handleTriggerChaos = async () => {
-        setIsDisasterMode(true);
-        setMetrics(prev => ({ ...prev, responseTime: 974, activeIncidents: 1 }));
-        try {
-            await apiClient.triggerMLScan('payment-service');
-        } catch (e) {}
-    };
+    fetchDashboardData();
+    const interval = setInterval(fetchDashboardData, 2000);
+    return () => clearInterval(interval);
+  }, [selectedServiceForChart]);
 
-    const handleLaunchAttack = async (mode = 'load_flood') => {
-        try {
-            toast.loading(`Launching ${mode} attack on Target App (Port 8002)...`, { id: 'attack-toast' });
-            await apiClient.startAttack(mode, 30);
-            setIsDisasterMode(true);
-            toast.error(`🔥 ATTACK ACTIVE ON TARGET APP!`, {
-                id: 'attack-toast',
-                description: `Target App (port 8002) is under high-concurrency ${mode}. Sentinel-X AI scanning...`,
-                duration: 5000
-            });
-        } catch (err) {
-            toast.error('Failed to launch attack', { id: 'attack-toast', description: err.message });
-        }
-    };
+  const handleServiceSelect = async (service) => {
+    setSelectedServiceForChart(service);
+    try {
+      const timeseriesData = await apiClient.getMetricsTimeseries(service, '120s');
+      setChartData(prev => ({
+        ...prev,
+        [service]: timeseriesData
+      }));
+    } catch (error) {
+      console.error('Error fetching timeseries for service:', error);
+    }
+  };
 
-    const handleStopAttack = async () => {
-        try {
-            await apiClient.stopAttack();
-            toast.success('Attack Stopped', { description: 'Target App returning to nominal traffic.' });
-        } catch (err) {
-            toast.error('Failed to stop attack', { description: err.message });
-        }
-    };
-
-    // Generate initial chart data
-    useEffect(() => {
-        const generateData = () => {
-            return Array.from({ length: 24 }, (_, i) => ({
-                time: `T-${24 - i}H`,
-                traffic: 2000 + Math.random() * 1000,
-                cpu: 30 + Math.random() * 20,
-                latency: 100 + Math.random() * 50
-            }));
-        };
-        setChartData(generateData());
-    }, []);
-
-    // Load Metrics & Setup Auto-Polling for ML Anomaly Scans
-    useEffect(() => {
-        const data = getDashboardMetrics();
-        setMetrics({
-            responseTime: 124,
-            successRate: 99.98,
-            activeIncidents: data.isAnomaly ? 1 : 0,
-            cpuUsage: parseInt(data.cpu.value),
-            requests: data.requests.value,
-            cost: data.cost.value
-        });
-        setIsDisasterMode(data.isAnomaly);
-
-        // Polling loop for live attack detection & remediation
-        const interval = setInterval(async () => {
-            try {
-                const scanRes = await apiClient.scanAll();
-                if (scanRes && scanRes.at_risk_count > 0) {
-                    setIsDisasterMode(true);
-                    setMetrics(prev => ({
-                        ...prev,
-                        responseTime: 740,
-                        activeIncidents: scanRes.at_risk_count
-                    }));
-                }
-                const actionsRes = await apiClient.getActions();
-                if (actionsRes && actionsRes.actions && actionsRes.actions.length > 0) {
-                    setLastScanResults(actionsRes.actions[0]);
-                }
-            } catch (err) {}
-        }, 2000);
-
-        return () => clearInterval(interval);
-    }, []);
-
-    const handleDeploy = async () => {
-        setActiveDeploy(true);
-
-        setTimeout(() => {
-            setActiveDeploy(false);
-            setIsDisasterMode(true);
-            toast.error('Alert: Latency spike detected in payment-service', {
-                description: 'Critical threshold exceeded. Check logs immediately.',
-                duration: 5000,
-                style: { background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b' },
-            });
-        }, 1500);
-    };
-
-    const handleRollback = () => {
-        setIsDisasterMode(false);
-        toast.success('Rollback successful', {
-            description: 'Services returning to normal operational levels.',
-            style: { background: '#ecfdf5', border: '1px solid #a7f3d0', color: '#065f46' },
-        });
-    };
-
-    const handleMLScan = async (service = 'payment-service') => {
-        setIsScanning(true);
-        try {
-            toast.loading('Initiating ML scan...', { id: 'ml-scan' });
-            
-            const scanResults = await apiClient.triggerMLScan(service);
-            setLastScanResults(scanResults);
-            
-            if (scanResults.anomaly?.is_anomaly) {
-                setIsDisasterMode(true);
-                toast.error('Anomaly Detected!', {
-                    id: 'ml-scan',
-                    description: `ML models detected ${scanResults.anomaly.anomaly_type || 'unusual patterns'} in ${service}`,
-                    duration: 5000,
-                    style: { background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b' },
-                });
-            } else {
-                toast.success('ML Scan Complete', {
-                    id: 'ml-scan',
-                    description: `No anomalies detected in ${service}. Systems operating normally.`,
-                    duration: 4000,
-                    style: { background: '#ecfdf5', border: '1px solid #a7f3d0', color: '#065f46' },
-                });
-            }
-        } catch (error) {
-            toast.error('ML Scan Failed', {
-                id: 'ml-scan',
-                description: error.message || 'Failed to connect to ML service',
-                duration: 5000,
-                style: { background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b' },
-            });
-        } finally {
-            setIsScanning(false);
-        }
-    };
-
-    const services = [
-        { name: 'API Gateway', id: 'api', status: 'Operational', uptime: '99.99%' },
-        { name: 'Auth Service', id: 'auth', status: 'Operational', uptime: '99.95%' },
-        { name: 'Payment Service', id: 'payment', status: isDisasterMode ? 'Degraded' : 'Operational', uptime: isDisasterMode ? '85.00%' : '99.99%' },
-        { name: 'Checkout Service', id: 'checkout', status: 'Operational', uptime: '99.90%' },
-        { name: 'Database Cluster', id: 'db', status: 'Operational', uptime: '99.99%' },
-        { name: 'Notification Svc', id: 'notif', status: 'Operational', uptime: '99.92%' },
-    ];
-
+  if (loading && nodes.length === 0) {
     return (
-        <div className="flex flex-col gap-6 min-h-full text-slate-900">
-            {/* Header Hero Title Section */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 py-2 px-1">
-                <div className="flex items-center gap-4">
-                    {/* Big Glowing Blue Icon Box */}
-                    <div className="h-14 w-14 bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/25 flex-shrink-0">
-                        <ShieldCheck className="w-8 h-8 text-white" />
-                    </div>
-                    <div>
-                        <h1 className="text-3xl sm:text-4xl font-black tracking-tight flex items-center gap-2">
-                            <span className="text-slate-900">SENTINEL-X</span>
-                            <span className="text-blue-600">AI ENGINE</span>
-                        </h1>
-                        <p className="text-xs sm:text-sm font-bold text-slate-600 uppercase tracking-widest flex items-center gap-1.5 mt-1">
-                            <span>⚡</span>
-                            <span>PREDICTIVE ANOMALY DETECTION & AUTO-REMEDIATION SHIELD</span>
-                        </p>
-                    </div>
-                </div>
-
-                {/* Status Capsule Card */}
-                <div className="bg-white/80 backdrop-blur-md border border-white/90 shadow-[0_10px_25px_-5px_rgba(100,116,139,0.1)] rounded-2xl px-6 py-3 flex items-center justify-between gap-6 self-start md:self-auto">
-                    <div className="flex flex-col">
-                        <span className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">SHIELD DEFENSE STATUS</span>
-                        <span className={`text-base font-black tracking-wider ${isDisasterMode ? 'text-red-600 animate-pulse' : 'text-emerald-600'}`}>
-                            {isDisasterMode ? '⚡ CRITICAL ATTACK ACTIVE' : '🟢 NOMINAL & PROTECTED'}
-                        </span>
-                    </div>
-                    <div className={`w-3.5 h-3.5 rounded-full ${isDisasterMode ? 'bg-red-500 animate-ping' : 'bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.8)]'}`} />
-                </div>
-            </div>
-
-            {/* Autonomous Robot Inspector & Auto-Repair Agent */}
-            <RobotInspector
-                isDisasterMode={isDisasterMode}
-                onCompleteRepair={handleRobotRepairComplete}
-                onTriggerChaos={handleTriggerChaos}
-            />
-
-            {/* AIOps Closed-Loop Self-Healing & 4-Phase Rollout Strategy Panel */}
-            <AIOpsClosedLoopSection />
-
-            {/* Top Metric Cards Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-                <NeumorphicMetricCard
-                    icon={Activity}
-                    label="SYSTEM UPTIME"
-                    value={isDisasterMode ? "96.4%" : "99.98%"}
-                    subtext="LIVE ACCURACY"
-                    statusColor="text-blue-600"
-                />
-                <NeumorphicMetricCard
-                    icon={Zap}
-                    label="LATENCY P95"
-                    value={`${metrics.responseTime} ms`}
-                    subtext="RESPONSE TIME"
-                    statusColor={metrics.responseTime > 500 ? "text-red-500 font-black animate-pulse" : "text-blue-600"}
-                />
-                <NeumorphicMetricCard
-                    icon={Brain}
-                    label="ML ANOMALY SCORE"
-                    value={isDisasterMode ? "0.94 (CRITICAL)" : "0.02 (HEALTHY)"}
-                    subtext="RANDOM FOREST + ISO FOREST"
-                    statusColor={isDisasterMode ? "text-red-600" : "text-emerald-600"}
-                />
-                <NeumorphicMetricCard
-                    icon={ShieldCheck}
-                    label="SHOPX STORE SHIELD"
-                    value={isDisasterMode ? "RATE LIMITED (429)" : "OPERATIONAL"}
-                    subtext="TARGET GATEWAY 8002"
-                    statusColor={isDisasterMode ? "text-amber-600" : "text-slate-900"}
-                />
-            </div>
-
-            {/* Section Divider Subtitle */}
-            <div className="flex items-center gap-2 pt-2">
-                <Gauge className="w-5 h-5 text-blue-600" />
-                <h2 className="text-xs font-black tracking-widest uppercase text-blue-600">
-                    SENTINEL ML PREDICTIVE INTELLIGENCE
-                </h2>
-            </div>
-
-            {/* Main Content Charts Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1">
-                {/* Main Risk & Turbulence Analysis Charts */}
-                <div className="lg:col-span-2 flex flex-col gap-6">
-                    <div className="bg-white/80 backdrop-blur-md border border-white/90 rounded-3xl p-6 shadow-[0_10px_30px_-5px_rgba(100,116,139,0.1)] flex flex-col justify-between">
-                        <div className="flex justify-between items-start mb-4">
-                            <div>
-                                <h3 className="text-sm font-black text-slate-800 tracking-wider uppercase">
-                                    RISK SURFACE ANALYSIS
-                                </h3>
-                                <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mt-0.5">
-                                    DOWNSTREAM SATURATION PROJECTION
-                                </p>
-                            </div>
-                            <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
-                                <Activity size={18} />
-                            </div>
-                        </div>
-
-                        <div className="h-[260px] w-full">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                                    <defs>
-                                        <linearGradient id="colorRisk" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor={isDisasterMode ? "#ef4444" : "#f43f5e"} stopOpacity={0.35} />
-                                            <stop offset="95%" stopColor={isDisasterMode ? "#ef4444" : "#f43f5e"} stopOpacity={0} />
-                                        </linearGradient>
-                                    </defs>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                                    <XAxis dataKey="time" stroke="#94a3b8" tickLine={false} axisLine={false} fontSize={11} />
-                                    <YAxis stroke="#94a3b8" tickLine={false} axisLine={false} fontSize={11} />
-                                    <Tooltip
-                                        contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.95)', border: '1px solid #e2e8f0', borderRadius: '12px', boxShadow: '0 10px 25px rgba(0,0,0,0.08)' }}
-                                        itemStyle={{ color: '#0f172a', fontWeight: 'bold' }}
-                                    />
-                                    <Area
-                                        type="monotone"
-                                        dataKey="cpu"
-                                        stroke={isDisasterMode ? "#ef4444" : "#f43f5e"}
-                                        strokeWidth={3}
-                                        fillOpacity={1}
-                                        fill="url(#colorRisk)"
-                                    />
-                                </AreaChart>
-                            </ResponsiveContainer>
-                        </div>
-
-                        <div className="flex justify-between items-center text-[10px] font-bold text-slate-400 uppercase tracking-widest pt-2 border-t border-slate-100 mt-2">
-                            <span>T-0H</span>
-                            <span>T-48H</span>
-                        </div>
-                    </div>
-
-                    {/* Secondary Inflow Turbulence Card */}
-                    <div className="bg-white/80 backdrop-blur-md border border-white/90 rounded-3xl p-6 shadow-[0_10px_30px_-5px_rgba(100,116,139,0.1)] flex flex-col justify-between">
-                        <div className="flex justify-between items-start mb-4">
-                            <div>
-                                <h3 className="text-sm font-black text-slate-800 tracking-wider uppercase">
-                                    INFLOW TURBULENCE
-                                </h3>
-                                <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mt-0.5">
-                                    HIGH-FREQUENCY PULSE STREAM
-                                </p>
-                            </div>
-                            <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
-                                <Zap size={18} />
-                            </div>
-                        </div>
-
-                        <div className="h-[140px] w-full">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <AreaChart data={chartData} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
-                                    <defs>
-                                        <linearGradient id="colorPulse" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor="#2563eb" stopOpacity={0.25} />
-                                            <stop offset="95%" stopColor="#2563eb" stopOpacity={0} />
-                                        </linearGradient>
-                                    </defs>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                                    <XAxis dataKey="time" stroke="#94a3b8" tickLine={false} axisLine={false} fontSize={10} />
-                                    <YAxis stroke="#94a3b8" tickLine={false} axisLine={false} fontSize={10} />
-                                    <Area type="monotone" dataKey="latency" stroke="#2563eb" strokeWidth={2} fill="url(#colorPulse)" />
-                                </AreaChart>
-                            </ResponsiveContainer>
-                        </div>
-
-                        <div className="flex justify-end items-center gap-2 pt-2 border-t border-slate-100 mt-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
-                            <div className="w-2 h-2 rounded-full bg-blue-600 animate-pulse" />
-                            <span>LIVE FLOW SYNC</span>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Right Controls Column */}
-                <div className="flex flex-col gap-6">
-                    {/* Live ShopX Store Attack Station Card */}
-                    <div className="bg-gradient-to-br from-slate-900 to-slate-800 text-white rounded-3xl p-6 shadow-xl border border-slate-700">
-                        <div className="flex items-center justify-between mb-3">
-                            <h3 className="text-sm font-black tracking-wider uppercase flex items-center gap-2 text-red-400">
-                                <Zap size={18} className="text-red-500 animate-pulse" /> ShopX Security Control
-                            </h3>
-                            <a href="http://localhost:8002" target="_blank" rel="noreferrer" className="text-[11px] font-bold text-blue-400 hover:underline">
-                                Visit ShopX Store ↗
-                            </a>
-                        </div>
-                        <p className="text-xs text-slate-300 mb-4">
-                            Simulate high-volume DDoS traffic or memory exhaustion targeting the live ShopX Store to test AI prediction & auto-mitigation.
-                        </p>
-                        <div className="flex flex-col gap-2.5">
-                            <button
-                                onClick={() => handleLaunchAttack('load_flood')}
-                                className="w-full py-2.5 px-4 bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-500 hover:to-orange-500 text-white rounded-xl font-bold text-xs uppercase tracking-wider shadow-md transition-all active:scale-[0.98] flex items-center justify-center gap-2"
-                            >
-                                🔥 Launch DDoS Attack on ShopX
-                            </button>
-                            <button
-                                onClick={() => handleLaunchAttack('memory_leak')}
-                                className="w-full py-2.5 px-4 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl font-bold text-xs uppercase tracking-wider shadow-md transition-all active:scale-[0.98] flex items-center justify-center gap-2"
-                            >
-                                💧 Launch RAM Leak Attack
-                            </button>
-                            <button
-                                onClick={handleStopAttack}
-                                className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2"
-                            >
-                                🛑 Stop Active Attack
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Canary Deployment Pill Card */}
-                    <div className="bg-white/80 backdrop-blur-md border border-white/90 rounded-3xl p-6 shadow-[0_10px_30px_-5px_rgba(100,116,139,0.1)]">
-                        <h3 className="text-sm font-black text-slate-800 tracking-wider uppercase mb-4 flex items-center gap-2">
-                            <Layers size={18} className="text-blue-600" /> Deployment Pipeline
-                        </h3>
-                        <div className="space-y-4">
-                            <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80">
-                                <div className="flex justify-between text-xs font-bold mb-1">
-                                    <span className="text-slate-500">Current Release</span>
-                                    <span className="font-mono text-emerald-600">v2.3.0</span>
-                                </div>
-                                <div className="flex justify-between text-xs font-medium">
-                                    <span className="text-slate-500">Last Deployed</span>
-                                    <span className="text-slate-700 font-semibold">2 days ago</span>
-                                </div>
-                            </div>
-
-                            {!isDisasterMode ? (
-                                <button
-                                    onClick={handleDeploy}
-                                    disabled={activeDeploy}
-                                    className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-full font-bold text-xs uppercase tracking-wider shadow-md shadow-blue-500/25 transition-all active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                                >
-                                    {activeDeploy ? (
-                                        <>
-                                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                            Deploying v2.4...
-                                        </>
-                                    ) : (
-                                        <>
-                                            <ArrowUp size={16} /> Deploy v2.4 (Canary)
-                                        </>
-                                    )}
-                                </button>
-                            ) : (
-                                <button
-                                    onClick={handleRollback}
-                                    className="w-full py-3 px-4 bg-red-600 hover:bg-red-700 text-white rounded-full font-bold text-xs uppercase tracking-wider shadow-md shadow-red-500/25 transition-all active:scale-[0.98] flex items-center justify-center gap-2 animate-pulse"
-                                >
-                                    <ArrowDown size={16} /> Rollback to v2.3
-                                </button>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* ML Analysis Card */}
-                    <div className="bg-white/80 backdrop-blur-md border border-white/90 rounded-3xl p-6 shadow-[0_10px_30px_-5px_rgba(100,116,139,0.1)]">
-                        <h3 className="text-sm font-black text-slate-800 tracking-wider uppercase mb-4 flex items-center gap-2">
-                            <Brain size={18} className="text-purple-600" /> ML Intelligence Engine
-                        </h3>
-                        <div className="space-y-4">
-                            <div className="p-3.5 rounded-2xl bg-purple-50/50 border border-purple-100">
-                                <div className="flex justify-between items-center mb-2">
-                                    <span className="text-xs font-bold text-slate-600">ML Model Health</span>
-                                    <span className="text-emerald-600 text-xs font-bold">● Active</span>
-                                </div>
-                                <div className="flex justify-between text-xs font-medium">
-                                    <span className="text-slate-500">Last Inspection</span>
-                                    <span className="text-slate-800 font-semibold">{lastScanResults ? 'Just now' : 'Never'}</span>
-                                </div>
-                            </div>
-
-                            <button
-                                onClick={() => handleMLScan('payment-service')}
-                                disabled={isScanning}
-                                className="w-full py-3 px-4 bg-purple-600 hover:bg-purple-700 text-white rounded-full font-bold text-xs uppercase tracking-wider shadow-md shadow-purple-500/25 transition-all active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                            >
-                                {isScanning ? (
-                                    <>
-                                        <Loader2 className="w-4 h-4 animate-spin" />
-                                        Scanning with ML Models...
-                                    </>
-                                ) : (
-                                    <>
-                                        <Brain size={16} /> Scan Data with ML
-                                    </>
-                                )}
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Recent Telemetry Log Card */}
-                    <div className="bg-white/80 backdrop-blur-md border border-white/90 rounded-3xl p-6 shadow-[0_10px_30px_-5px_rgba(100,116,139,0.1)] flex-1">
-                        <h3 className="text-sm font-black text-slate-800 tracking-wider uppercase mb-4 flex items-center gap-2">
-                            <Activity size={18} className="text-blue-600" /> Live Stream Telemetry
-                        </h3>
-                        <div className="space-y-3">
-                            {[
-                                { text: 'Database cluster sync completed', time: '10m ago', type: 'success' },
-                                { text: 'Inflow turbulence warning', time: '1h ago', type: 'warning' },
-                                { text: 'Auto-scaling policy evaluated', time: '2h ago', type: 'info' }
-                            ].map((event, i) => (
-                                <div key={i} className="flex gap-3 items-start p-2 rounded-xl hover:bg-slate-50 transition-all">
-                                    <div className={`mt-1.5 w-2 h-2 rounded-full ${event.type === 'success' ? 'bg-emerald-500' : event.type === 'warning' ? 'bg-amber-500' : 'bg-blue-500'}`} />
-                                    <div>
-                                        <p className="text-xs font-bold text-slate-800">{event.text}</p>
-                                        <p className="text-[10px] font-semibold text-slate-400 mt-0.5">{event.time}</p>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* Service Mesh Health Grid */}
-            <div className="pt-2">
-                <h3 className="text-xs font-black tracking-widest uppercase text-blue-600 mb-3 flex items-center gap-2">
-                    <Server size={16} /> Infrastructure Mesh Nodes
-                </h3>
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-                    {services.map((service) => (
-                        <div
-                            key={service.name}
-                            className={`p-4 rounded-2xl border transition-all duration-300 ${
-                                isDisasterMode && service.id === 'payment'
-                                    ? 'bg-red-50 border-red-200 shadow-md shadow-red-500/10'
-                                    : 'bg-white/80 backdrop-blur-md border-white/90 shadow-[0_4px_15px_-2px_rgba(100,116,139,0.08)] hover:shadow-lg'
-                            }`}
-                        >
-                            <div className="flex justify-between items-start mb-2">
-                                <Server size={18} className={`flex-shrink-0 ${isDisasterMode && service.id === 'payment' ? 'text-red-500' : 'text-slate-500'}`} />
-                                <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${isDisasterMode && service.id === 'payment' ? 'bg-red-500 animate-ping' : 'bg-emerald-500'}`} />
-                            </div>
-                            <h4 className="font-bold text-xs text-slate-800 truncate" title={service.name}>{service.name}</h4>
-                            <div className="flex justify-between items-end mt-3">
-                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
-                                    isDisasterMode && service.id === 'payment' ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'
-                                }`}>
-                                    {isDisasterMode && service.id === 'payment' ? 'Degraded' : 'Healthy'}
-                                </span>
-                                <span className="text-[10px] text-slate-500 font-mono">{service.uptime}</span>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            </div>
-
-            {/* Correlation Analysis Section */}
-            <div className="mt-4">
-                <CorrelationAnalysis />
-            </div>
+      <div className="p-6">
+        <div className="flex flex-col items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-blue-500 mb-4" />
+          <p className="text-slate-500">Loading dashboard telemetry...</p>
         </div>
+      </div>
     );
-};
+  }
 
-// Neumorphic Metric Card Component strictly adhering to Reference Screenshot
-const NeumorphicMetricCard = ({ icon: Icon, label, value, subtext, statusColor }) => (
-    <div className="bg-white/80 backdrop-blur-md border border-white/90 rounded-3xl p-6 shadow-[0_10px_30px_-5px_rgba(100,116,139,0.1),0_4px_6px_-4px_rgba(100,116,139,0.04)] hover:shadow-[0_15px_35px_-5px_rgba(37,99,235,0.12)] transition-all flex flex-col justify-between min-h-[140px]">
-        <div className="flex items-center justify-between">
-            <Icon size={22} className="text-slate-700" />
+  const activePoints = chartData[selectedServiceForChart]?.points || [];
+
+  return (
+    <div className="p-6 space-y-6">
+      {/* Live Attack Warning Banner */}
+      {activeAttack?.is_active && (
+        <div className="bg-gradient-to-r from-red-600 via-amber-600 to-red-700 text-white p-4 rounded-2xl shadow-xl flex items-center justify-between animate-pulse">
+          <div className="flex items-center gap-3">
+            <Zap className="h-6 w-6 text-yellow-300 animate-bounce" />
+            <div>
+              <h4 className="font-black text-sm uppercase tracking-wider">
+                🔥 ATTACK ACTIVE ON TARGET APP: {activeAttack.mode?.toUpperCase()}
+              </h4>
+              <p className="text-xs opacity-90 font-medium">
+                High concurrency telemetry anomaly detected on <span className="font-bold underline">{selectedServiceForChart}</span>. Real-time metric graph spiking!
+              </p>
+            </div>
+          </div>
+          <span className="px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-xs font-mono font-bold">
+            SCANNER ACTIVE
+          </span>
         </div>
-        <div className="my-2">
-            <h4 className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">{label}</h4>
-            <p className={`text-2xl sm:text-3xl font-black ${statusColor} tracking-tight mt-1`}>{value}</p>
+      )}
+
+      {/* Node Status Grid (Top Section) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {nodes.map((node) => {
+          const statusColor = node.status === 'critical' ? 'border-red-500' : 
+                            node.status === 'degrading' ? 'border-amber-500' : 
+                            'border-emerald-500';
+          const bgColor = node.status === 'critical' ? 'bg-red-50/50' : 
+                        node.status === 'degrading' ? 'bg-amber-50/50' : 
+                        'bg-emerald-50/50';
+          const isSelected = node.service === selectedServiceForChart;
+          
+          return (
+            <div 
+              key={node.service} 
+              className={`cursor-pointer border-2 ${statusColor} ${bgColor} rounded-xl p-4 hover:border-[3px] transition-all ${
+                isSelected ? 'ring-2 ring-blue-500 shadow-md' : ''
+              }`}
+              onClick={() => handleServiceSelect(node.service)}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="font-bold text-slate-900 flex items-center gap-1.5">
+                  <Server size={16} className="text-slate-600" />
+                  {node.service}
+                </h3>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                  node.status === 'critical' ? 'bg-red-100 text-red-800' : 
+                  node.status === 'degrading' ? 'bg-amber-100 text-amber-800' : 
+                  'bg-emerald-100 text-emerald-800'
+                }`}>
+                  {node.status}
+                </span>
+              </div>
+              
+              <div className="space-y-1.5 text-xs font-mono">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">CPU:</span>
+                  <span className={`font-bold ${node.metrics.cpu_pct > 75 ? 'text-red-600' : 'text-slate-800'}`}>
+                    {node.metrics.cpu_pct.toFixed(1)}%
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Memory:</span>
+                  <span className={`font-bold ${node.metrics.memory_mb > 350 ? 'text-red-600' : 'text-slate-800'}`}>
+                    {node.metrics.memory_mb.toFixed(1)} MB
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Latency (p95):</span>
+                  <span className={`font-bold ${node.metrics.p95_latency_ms > 200 ? 'text-red-600' : 'text-slate-800'}`}>
+                    {node.metrics.p95_latency_ms.toFixed(0)} ms
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Errors/s:</span>
+                  <span className="font-bold text-slate-800">{node.metrics.error_rate}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      
+      {/* Live Metric Charts and Model Confidence Panel */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        {/* Live Metric Charts (Large Section) */}
+        <div className="col-span-2 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-slate-100">
+            <div>
+              <h3 className="font-black text-slate-900 text-base flex items-center gap-2">
+                <Activity size={18} className="text-blue-600" />
+                Telemetry Graph Spike Monitor — <span className="text-blue-600 font-mono">{selectedServiceForChart}</span>
+              </h3>
+              <p className="text-xs text-slate-500 font-medium">Real-time metrics stream & anomaly detection waveform</p>
+            </div>
+            
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-full border border-slate-200">
+              {[
+                { id: 'all', label: 'ALL' },
+                { id: 'cpu', label: 'CPU %' },
+                { id: 'latency', label: 'LATENCY' },
+                { id: 'memory', label: 'RAM' }
+              ].map(f => (
+                <button
+                  key={f.id}
+                  onClick={() => setActiveMetricFilter(f.id)}
+                  className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase transition-all ${
+                    activeMetricFilter === f.id ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          
+          {/* Chart Container */}
+          <div className="h-72">
+            {activePoints.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart 
+                  data={activePoints}
+                  margin={{ top: 20, right: 20, left: 0, bottom: 5 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="t" tick={{ fontSize: 11 }} />
+                  <YAxis tick={{ fontSize: 11 }} />
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: '#0f172a', borderRadius: '12px', color: '#fff', fontSize: '12px' }} 
+                  />
+                  <Legend verticalAlign="top" height={36} />
+                  
+                  {(activeMetricFilter === 'all' || activeMetricFilter === 'cpu') && (
+                    <Line 
+                      type="monotone" 
+                      name="CPU Usage (%)"
+                      dataKey="cpu_pct" 
+                      stroke="#3b82f6" 
+                      strokeWidth={3}
+                      dot={{ r: 3 }}
+                      activeDot={{ r: 6 }}
+                    />
+                  )}
+                  
+                  {(activeMetricFilter === 'all' || activeMetricFilter === 'memory') && (
+                    <Line 
+                      type="monotone" 
+                      name="Memory (MB)"
+                      dataKey="memory_mb" 
+                      stroke="#10b981" 
+                      strokeWidth={2}
+                      dot={{ r: 2 }}
+                    />
+                  )}
+                  
+                  {(activeMetricFilter === 'all' || activeMetricFilter === 'latency') && (
+                    <Line 
+                      type="monotone" 
+                      name="P95 Latency (ms)"
+                      dataKey="p95_latency_ms" 
+                      stroke="#ef4444" 
+                      strokeWidth={3}
+                      dot={{ r: 3 }}
+                      activeDot={{ r: 6 }}
+                    />
+                  )}
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-slate-400">
+                <Loader2 className="h-6 w-6 animate-spin mb-2 text-blue-500" />
+                <p className="text-xs">Streaming metrics for {selectedServiceForChart}...</p>
+              </div>
+            )}
+          </div>
         </div>
-        <div className="pt-2 border-t border-slate-100">
-            <p className="text-[10px] font-bold italic uppercase tracking-widest text-slate-500">{subtext}</p>
+        
+        {/* Right Column: Model Confidence Panel & Recent Activity */}
+        <div className="col-span-1 space-y-6">
+          {/* Model Confidence Panel */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-semibold text-slate-900">Model Confidence</h3>
+              <div className="text-xs text-slate-500">Per-node ML analysis</div>
+            </div>
+            
+            <div className="space-y-3">
+              {nodes.map((node) => {
+                const model = node.model || { rf_class: 'healthy', rf_confidence: 0.95, if_score: -0.1, if_anomaly: false };
+                const rfColor = model.rf_class === 'critical' ? 'text-red-600' : 
+                              model.rf_class === 'degrading' ? 'text-amber-600' : 
+                              'text-emerald-600';
+                const ifStatus = model.if_anomaly ? 'ANOMALY DETECTED' : 'NORMAL';
+                const ifColor = model.if_anomaly ? 'text-red-600' : 'text-emerald-600';
+                
+                return (
+                  <div key={node.service} className="border-l-2 pl-3">
+                    <div className="flex items-center justify-between mb-1">
+                      <h4 className="font-semibold">{node.service}</h4>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+                        node.status === 'critical' ? 'bg-red-100 text-red-800' : 
+                        node.status === 'degrading' ? 'bg-amber-100 text-amber-800' : 
+                        'bg-emerald-100 text-emerald-800'
+                      }`}>
+                        {node.status.toUpperCase()}
+                      </span>
+                    </div>
+                    
+                    <div className="text-sm space-y-1">
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Random Forest:</span>
+                        <span className={`${rfColor} font-medium`}>
+                          {model.rf_class.toUpperCase()} 
+                          <span className="text-slate-400">({(model.rf_confidence * 100).toFixed(0)}%)</span>
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Isolation Forest:</span>
+                        <span className={`${ifColor} font-medium`}>
+                          {ifStatus} 
+                          <span className="text-slate-400">({model.if_score.toFixed(3)})</span>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              
+              {/* Overall Assessment */}
+              <div className="mt-4 pt-3 border-t border-slate-200/50">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-600">System Status:</span>
+                  <span className={`font-semibold ${
+                    systemStatus === 'critical' ? 'text-red-600' : 
+                    systemStatus === 'degrading' ? 'text-amber-600' : 
+                    'text-emerald-600'
+                  }`}>
+                    {systemStatus.toUpperCase()}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs mt-1">
+                  <span className="text-slate-600">Worst Node:</span>
+                  <span className="font-mono">{worstNode || 'None'}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          {/* Recent Activity Feed */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-semibold text-slate-900">Recent Activity</h3>
+              <p className="text-xs text-slate-500">Last 5 events</p>
+            </div>
+            
+            <div className="space-y-2">
+              {recentActivity.length > 0 ? (
+                recentActivity.map((activity) => {
+                  const time = new Date(activity.timestamp);
+                  const timeAgo = `${Math.floor((Date.now() - time.getTime()) / 1000)}s ago`;
+                  
+                  const typeColors = {
+                    anomaly_detected: 'bg-red-50/50 border-l-4 border-red-500',
+                    threshold_breach: 'bg-amber-50/50 border-l-4 border-amber-500', 
+                    remediation_triggered: 'bg-emerald-50/50 border-l-4 border-emerald-500',
+                    recovered: 'bg-blue-50/50 border-l-4 border-blue-500'
+                  };
+                  
+                  const typeLabels = {
+                    anomaly_detected: 'ANOMALY DETECTED',
+                    threshold_breach: 'THRESHOLD BREACH',
+                    remediation_triggered: 'REMEDIATION TRIGGERED',
+                    recovered: 'SYSTEM RECOVERED'
+                  };
+                  
+                  const severityColors = {
+                    critical: 'text-red-600',
+                    high: 'text-orange-600', 
+                    medium: 'text-amber-600',
+                    low: 'text-emerald-600'
+                  };
+                  
+                  return (
+                    <div 
+                      key={activity.id} 
+                      className={`p-3 rounded-lg ${typeColors[activity.type] || 'bg-slate-50/50 border-l-4 border-slate-500'}`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-2">
+                          <div className={`h-2 w-2 rounded-full ${
+                            activity.severity === 'critical' ? 'bg-red-600' : 
+                            activity.severity === 'high' ? 'bg-orange-600' : 
+                            activity.severity === 'medium' ? 'bg-amber-600' : 
+                            'bg-emerald-600'
+                          }`} />
+                          <span className="font-semibold text-slate-900">
+                            {typeLabels[activity.type] || activity.type.toUpperCase()}
+                          </span>
+                        </div>
+                        <span className="text-xs text-slate-400">{timeAgo}</span>
+                      </div>
+                      
+                      <div className="text-sm text-slate-700">
+                        {activity.description || `Event on ${activity.service}`}
+                      </div>
+                      
+                      {activity.detail && (
+                        <div className="mt-2 pt-2 border-t border-slate-200/20 text-xs">
+                          <div className="flex justify-between text-slate-500">
+                            <span>Service:</span>
+                            <span className="font-mono">{activity.service}</span>
+                          </div>
+                          {activity.detail.linked_action_id && (
+                            <div className="flex justify-between text-slate-500 mt-1">
+                              <span>Action:</span>
+                              <span className="font-mono">#{activity.detail.linked_action_id}</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="text-center py-4 text-slate-400">
+                  No recent activity
+                </div>
+              )}
+            </div>
+          </div>
         </div>
+      </div>
     </div>
-);
+  );
+};
 
 export default Dashboard;

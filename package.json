@@ -1,0 +1,9 @@
+{
+  "name": "beachhack-root",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "cd hackforchrist/frontend && npm run dev",
+    "start": "cd hackforchrist && bash run_locally.sh"
+  }
+}

@@ -1,0 +1,34 @@
+{
+    "timestamp": "2026-01-31T16:53:01.882386",
+    "service": "payment-service",
+    "isolation_forest": {
+        "is_anomaly": true,
+        "anomaly_score": -0.05392487717869676
+    },
+    "random_forest": {
+        "prediction": "Normal",
+        "probabilities": [
+            0.05333333333333334,
+            0.38333333333333336,
+            0.4866666666666667,
+            0.07666666666666666
+        ]
+    },
+    "features": {
+        "mean_cpu": 12.866846392359106,
+        "std_cpu": 3.802876985601392,
+        "min_cpu": 7.17215398911107,
+        "max_cpu": 17.424595014415743,
+        "delta_cpu": 0.14781698249467468,
+        "cpu_trend": 0.17799435558360066,
+        "cpu_volatility": 3.802876985601392,
+        "mean_memory": 5559.924107142857,
+        "std_memory": 66.00598721309399,
+        "memory_trend": 7.806919642857258,
+        "mean_requests": 1472.2857142857142,
+        "request_spike_count": 0.0,
+        "throughput_delta": -156.0,
+        "cost_delta": -0.5226091508752688,
+        "unit_economics_ratio": 26.17741976838306
+    }
+}
